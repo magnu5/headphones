@@ -559,8 +559,11 @@ def sort_search_results(resultlist, album, new, albumlength):
                     )
                     return sort_by_priority_then_size(lossless_results)
 
-        except Exception:
-            logger.exception('Unhandled exception')
+        except (KeyError, IndexError, AttributeError) as e:
+            logger.warning('Missing album data or invalid format: %s', e)
+            return sort_by_priority_then_size(results_with_priority)
+        except Exception as e:
+            logger.exception('Unhandled exception in search: %s', e)
             logger.info(
                 f"No track information for {album['ArtistName']} - "
                 f"{album['AlbumTitle']}. Defaulting to highest quality"
@@ -1596,7 +1599,7 @@ def searchTorrent(album, new=False, losslessOnly=False, albumlength=None,
                                                         password=password,
                                                         url=providerurl)
                 else:
-                    raise(f"Neither apikey nor username/password provided for provider {provider}.")
+                    raise ValueError(f"Neither apikey nor username/password provided for provider {provider}.")
                 gazelleobj._login()
             except Exception as e:
                 gazelleobj = None

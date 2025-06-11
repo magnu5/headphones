@@ -163,6 +163,10 @@ def main():
     # Read config and start logging
     try:
         headphones.initialize(config_file)
+        # Validate configuration settings
+        from headphones.config import validate_config
+        if not validate_config():
+            headphones.logger.error("Configuration validation failed. Please check your settings.")
     except headphones.exceptions.SoftChrootError as e:
         raise SystemExit('FATAL ERROR')
 

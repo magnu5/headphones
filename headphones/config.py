@@ -17,6 +17,43 @@ def bool_int(value):
     return int(bool(value))
 
 
+def validate_config():
+    """
+    Validate critical configuration settings to prevent runtime errors
+    """
+    import headphones
+    from headphones import logger
+    
+    errors = []
+    warnings = []
+    
+    # Check database settings
+    if not hasattr(headphones.CONFIG, 'CACHE_SIZEMB') or not headphones.CONFIG.CACHE_SIZEMB:
+        warnings.append("Database cache size not set, using default")
+    
+    # Check required API settings
+    if headphones.CONFIG.ORPHEUS and not (headphones.CONFIG.ORPHEUS_USERNAME or headphones.CONFIG.ORPHEUS_APIKEY):
+        errors.append("Orpheus enabled but no username/API key configured")
+    
+    if headphones.CONFIG.REDACTED and not (headphones.CONFIG.REDACTED_USERNAME or headphones.CONFIG.REDACTED_APIKEY):
+        errors.append("Redacted enabled but no username/API key configured")
+    
+    # Check download paths
+    if headphones.CONFIG.SAB_HOST and not headphones.CONFIG.SAB_APIKEY:
+        warnings.append("SABnzbd host configured but no API key")
+    
+    if headphones.CONFIG.TORRENTBLACKHOLE_DIR and not os.path.exists(headphones.CONFIG.TORRENTBLACKHOLE_DIR):
+        warnings.append(f"Torrent blackhole directory does not exist: {headphones.CONFIG.TORRENTBLACKHOLE_DIR}")
+    
+    for error in errors:
+        logger.error(f"Configuration error: {error}")
+    
+    for warning in warnings:
+        logger.warning(f"Configuration warning: {warning}")
+    
+    return len(errors) == 0
+
+
 class path(str):
     """Internal 'marker' type for paths in config."""
 

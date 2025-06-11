@@ -44,13 +44,14 @@ class DBConnection:
     def __init__(self, filename="headphones.db"):
 
         self.filename = filename
-        self.connection = sqlite3.connect(dbFilename(filename), timeout=20)
-        # don't wait for the disk to finish writing
-        self.connection.execute("PRAGMA synchronous = OFF")
-        # default set to Write-Ahead Logging WAL
+        self.connection = sqlite3.connect(dbFilename(filename), timeout=30, check_same_thread=False)
+        # Optimize database performance
+        self.connection.execute("PRAGMA synchronous = NORMAL")  # Better balance of safety/performance
         self.connection.execute("PRAGMA journal_mode = %s" % headphones.CONFIG.JOURNAL_MODE)
-        # 64mb of cache memory,probably need to make it user configurable
         self.connection.execute("PRAGMA cache_size=-%s" % (getCacheSize() * 1024))
+        self.connection.execute("PRAGMA temp_store = MEMORY")  # Store temp tables in memory
+        self.connection.execute("PRAGMA mmap_size = 268435456")  # 256MB memory mapping
+        self.connection.execute("PRAGMA optimize")  # Enable query optimizer
         self.connection.row_factory = sqlite3.Row
 
     def action(self, query, args=None, upsert_insert_qry=None):

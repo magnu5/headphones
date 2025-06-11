@@ -19,6 +19,8 @@ import collections
 import sys
 from bs4 import BeautifulSoup
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from headphones import logger
 import feedparser
 import headphones
@@ -26,6 +28,22 @@ import headphones.lock
 from bs4.builder import XMLParsedAsHTMLWarning
 import warnings
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
+# Configure session with connection pooling and retry strategy
+session = requests.Session()
+retry_strategy = Retry(
+    total=3,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["HEAD", "GET", "OPTIONS"],
+    backoff_factor=1
+)
+adapter = HTTPAdapter(
+    max_retries=retry_strategy,
+    pool_connections=20,
+    pool_maxsize=20
+)
+session.mount("http://", adapter)
+session.mount("https://", adapter)
 
 
 # Disable SSL certificate warnings. We have our own handling
@@ -66,9 +84,8 @@ def request_response(url, method="get", auto_raise=True,
         except:
             pass
 
-    # Map method to the request.XXX method. This is a simple hack, but it
-    # allows requests to apply more magic per method. See lib/requests/api.py.
-    request_method = getattr(requests, method.lower())
+    # Map method to the session.XXX method for connection pooling
+    request_method = getattr(session, method.lower())
 
     try:
         # Request URL and wait for response

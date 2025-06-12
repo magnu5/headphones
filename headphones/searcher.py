@@ -758,7 +758,26 @@ def searchNZB(album, new=False, losslessOnly=False, albumlength=None,
                         try:
                             url = item.link
                             title = item.title
-                            size = int(item.links[1]['length'])
+
+                            # Initialize size
+                            size = 0
+
+                            # Try to get the size attribute safely
+                            if hasattr(item, 'links') and len(item.links) > 1:
+                                if 'length' in item.links[1]:
+                                    size = int(item.links[1]['length'])
+                                elif hasattr(item, 'enclosures') and len(item.enclosures) > 0 and 'length' in item.enclosures[0]:
+                                    size = int(item.enclosures[0]['length'])
+
+                            # Fallback attempts
+                            if size == 0:
+                                if hasattr(item, 'size'):
+                                    size = int(item.size)
+                                elif hasattr(item, 'length'):
+                                    size = int(item.length)
+                                else:
+                                    logger.debug('Could not determine size for %s', title)
+
                             if all(word.lower() in title.lower() for word in term.split()):
                                 logger.info(
                                     'Found %s. Size: %s' % (title, bytes_to_mb(size)))

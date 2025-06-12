@@ -27,6 +27,129 @@ import headphones
 from headphones import logger
 
 
+def checkCompleted(nzb_id):
+    """
+    Check if an NZB has completed downloading with robust error handling.
+    
+    Args:
+        nzb_id: ID or name of the NZB to check
+        
+    Returns:
+        dict: {'completed': bool, 'progress': float, 'status': str} or None if error
+    """
+    if not nzb_id:
+        logger.error("NZBget checkCompleted called with empty nzb_id")
+        return None
+        
+    if not headphones.CONFIG.NZBGET_HOST:
+        logger.error("No NZBget host found in configuration.")
+        return None
+        
+    nzbgetXMLrpc = "%(protocol)s://%(username)s:%(password)s@%(host)s/xmlrpc"
+    
+    try:
+        if headphones.CONFIG.NZBGET_HOST.startswith('https://'):
+            protocol = 'https'
+            host = headphones.CONFIG.NZBGET_HOST.replace('https://', '', 1)
+        else:
+            protocol = 'http'
+            host = headphones.CONFIG.NZBGET_HOST.replace('http://', '', 1)
+
+        url = nzbgetXMLrpc % {"protocol": protocol, "host": host,
+                              "username": headphones.CONFIG.NZBGET_USERNAME,
+                              "password": headphones.CONFIG.NZBGET_PASSWORD}
+
+        nzbGetRPC = xmlrpc.client.ServerProxy(url)
+        
+        # First check the download queue
+        try:
+            queue = nzbGetRPC.listgroups()
+        except xmlrpc.client.Fault as e:
+            logger.error(f"NZBget XML-RPC fault while checking queue: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error connecting to NZBget for queue check: {e}")
+            return None
+            
+        if queue:
+            for item in queue:
+                try:
+                    if str(item.get('NZBID')) == str(nzb_id) or item.get('NZBName') == str(nzb_id):
+                        name = item.get('NZBName', 'unknown')
+                        total_mb = item.get('FileSizeMB', 0)
+                        remaining_mb = item.get('RemainingSizeMB', 0)
+                        
+                        # Calculate progress safely
+                        try:
+                            if total_mb > 0:
+                                progress = max(0, (total_mb - remaining_mb) / total_mb)
+                            else:
+                                progress = 0
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            progress = 0
+                        
+                        status = item.get('Status', 'unknown')
+                        
+                        # Still in queue, not completed
+                        logger.debug(f"NZBget NZB {name}: {progress*100:.1f}% complete, status: {status} (in queue)")
+                        
+                        return {
+                            'completed': False,
+                            'progress': progress,
+                            'status': status,
+                            'name': name
+                        }
+                except Exception as e:
+                    logger.warning(f"Error processing NZBget queue item: {e}")
+                    continue
+        
+        # Check the history for completed downloads
+        try:
+            history = nzbGetRPC.history()
+        except xmlrpc.client.Fault as e:
+            logger.error(f"NZBget XML-RPC fault while checking history: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error connecting to NZBget for history check: {e}")
+            return None
+            
+        if history:
+            for item in history:
+                try:
+                    if str(item.get('NZBID')) == str(nzb_id) or item.get('Name') == str(nzb_id):
+                        name = item.get('Name', 'unknown')
+                        status = item.get('Status', 'unknown')
+                        
+                        # Status can be: SUCCESS, FAILURE, WARNING, etc.
+                        completed = status == 'SUCCESS'
+                        progress = 1.0 if completed else 0.0
+                        
+                        logger.debug(f"NZBget NZB {name}: status: {status} (in history)")
+                        
+                        return {
+                            'completed': completed,
+                            'progress': progress,
+                            'status': status,
+                            'name': name
+                        }
+                except Exception as e:
+                    logger.warning(f"Error processing NZBget history item: {e}")
+                    continue
+        
+        logger.warning(f"NZBget NZB with ID/name {nzb_id} not found in queue or history")
+        return None
+        
+    except xmlrpc.client.ProtocolError as e:
+        if "Unauthorized" in str(e):
+            logger.error("NZBget authentication failed - check username/password")
+        else:
+            logger.error(f"NZBget protocol error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error checking NZBget completion for {nzb_id}: {e}")
+        return None
+
+
 def sendNZB(nzb):
     addToTop = False
     nzbgetXMLrpc = "%(protocol)s://%(username)s:%(password)s@%(host)s/xmlrpc"

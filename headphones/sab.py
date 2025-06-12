@@ -99,6 +99,104 @@ def sendNZB(nzb):
         return False
 
 
+def checkCompleted(nzb_id):
+    """
+    Check if an NZB has completed downloading with robust error handling.
+    
+    Args:
+        nzb_id: ID of the NZB to check
+        
+    Returns:
+        dict: {'completed': bool, 'progress': float, 'status': str} or None if error
+    """
+    if not nzb_id:
+        logger.error("SABnzbd checkCompleted called with empty nzb_id")
+        return None
+        
+    try:
+        # First check the queue
+        params = {'mode': 'queue'}
+        response = sab_api_call(params=params)
+        
+        if response:
+            if 'error' in response:
+                logger.error(f"SABnzbd API error while checking queue: {response['error']}")
+                return None
+                
+            queue = response.get('queue', {})
+            slots = queue.get('slots', [])
+            
+            for slot in slots:
+                try:
+                    if slot.get('nzo_id') == nzb_id:
+                        name = slot.get('filename', 'unknown')
+                        progress_str = slot.get('percentage', '0')
+                        try:
+                            progress = float(progress_str) / 100.0
+                        except (ValueError, TypeError):
+                            progress = 0.0
+                        status = slot.get('status', 'unknown')
+                        
+                        # Still in queue, not completed
+                        logger.debug(f"SABnzbd NZB {name}: {progress*100:.1f}% complete, status: {status} (in queue)")
+                        
+                        return {
+                            'completed': False,
+                            'progress': progress,
+                            'status': status,
+                            'name': name
+                        }
+                except Exception as e:
+                    logger.warning(f"Error processing queue slot in SABnzbd check: {e}")
+                    continue
+        else:
+            logger.warning("SABnzbd queue check returned no response")
+        
+        # Check history for completed downloads
+        params = {'mode': 'history', 'limit': 50}
+        response = sab_api_call(params=params)
+        
+        if response:
+            if 'error' in response:
+                logger.error(f"SABnzbd API error while checking history: {response['error']}")
+                return None
+                
+            history = response.get('history', {})
+            slots = history.get('slots', [])
+            
+            for slot in slots:
+                try:
+                    if slot.get('nzo_id') == nzb_id:
+                        name = slot.get('name', 'unknown')
+                        status = slot.get('status', 'unknown')
+                        stage_log = slot.get('stage_log', [])
+                        
+                        # Status can be: Completed, Failed, etc.
+                        completed = status == 'Completed'
+                        progress = 1.0 if completed else 0.0
+                        
+                        logger.debug(f"SABnzbd NZB {name}: status: {status} (in history)")
+                        
+                        return {
+                            'completed': completed,
+                            'progress': progress,
+                            'status': status,
+                            'name': name
+                        }
+                except Exception as e:
+                    logger.warning(f"Error processing history slot in SABnzbd check: {e}")
+                    continue
+        else:
+            logger.warning("SABnzbd history check returned no response")
+        
+        logger.warning(f"SABnzbd NZB with ID {nzb_id} not found in queue or history")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error checking SABnzbd completion for {nzb_id}: {e}")
+        return None
+
+
 def checkConfig():
     params = {'mode': 'get_config',
               'section': 'misc',

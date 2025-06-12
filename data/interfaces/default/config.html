@@ -115,6 +115,12 @@
                                     </label>
                                     <input type="text" name="download_scan_interval" value="${config['download_scan_interval']}" size="4">mins
                                 </div>
+                                <div class="row checkbox">
+                                    <input type="checkbox" name="check_completion_via_api" value="1" ${config['check_completion_via_api']} />
+                                    <label title="Enable direct API checking for torrent/download client completion status instead of folder watching. When enabled, Headphones will use the download client's API to check for completion instead of scanning download folders.">
+                                        <span>Check Completion via API</span>
+                                    </label>
+                                </div>
                                 <div class="row">
                                     <label title="Time between two library update scans.">
                                         Library Scan Interval

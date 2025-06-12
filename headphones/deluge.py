@@ -547,6 +547,65 @@ def setTorrentLabel(result):
     return not json.loads(response.text)['error']
 
 
+def checkCompleted(torrentid):
+    """
+    Check if a torrent has completed downloading
+    
+    Args:
+        torrentid: Hash of the torrent to check
+        
+    Returns:
+        dict: {'completed': bool, 'progress': float, 'status': str} or None if error
+    """
+    logger.debug('Deluge: Checking torrent completion for %s' % torrentid)
+    if not any(delugeweb_auth):
+        _get_auth()
+
+    try:
+        post_data = json.dumps({"method": "web.get_torrent_status",
+                                "params": [
+                                    torrentid,
+                                    [
+                                        "name",
+                                        "state",
+                                        "progress",
+                                        "total_done",
+                                        "total_size"
+                                    ]
+                                ],
+                                "id": 27})
+
+        response = requests.post(delugeweb_url, data=post_data.encode('utf-8'), cookies=delugeweb_auth,
+            verify=deluge_verify_cert, headers=headers)
+        
+        result = json.loads(response.text)['result']
+        if not result:
+            logger.error(f"Deluge: Torrent {torrentid} not found")
+            return None
+            
+        name = result.get('name', 'unknown')
+        state = result.get('state', 'unknown')
+        progress = result.get('progress', 0) / 100.0  # Deluge returns progress as percentage
+        
+        # Deluge states: Allocating, Checking, Downloading, Seeding, Paused, Error, Queued
+        completed = state.lower() in ['seeding'] or progress >= 1.0
+        
+        logger.debug(f"Deluge torrent {name}: {progress*100:.1f}% complete, state: {state}")
+        
+        return {
+            'completed': completed,
+            'progress': progress,
+            'status': state,
+            'name': name
+        }
+        
+    except Exception as e:
+        logger.error('Deluge: Checking torrent completion failed: %s' % str(e))
+        formatted_lines = traceback.format_exc().splitlines()
+        logger.error('; '.join(formatted_lines))
+        return None
+
+
 def setSeedRatio(result):
     logger.debug('Deluge: Setting seed ratio')
     if not any(delugeweb_auth):

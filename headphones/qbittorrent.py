@@ -292,6 +292,53 @@ def setSeedRatio(hash, ratio):
         return
 
 
+def checkCompleted(hash):
+    """
+    Check if a torrent has completed downloading
+    
+    Args:
+        hash: Hash of the torrent to check
+        
+    Returns:
+        dict: {'completed': bool, 'progress': float, 'status': str} or None if error
+    """
+    logger.debug('checkCompleted(%s)' % hash)
+    
+    qbclient = qbittorrentclient()
+    
+    try:
+        if qbclient.version == 2:
+            torrentlist = qbclient.qb.torrents(hashes=hash.lower())
+        else:
+            status, torrentlist = qbclient._get_list()
+            
+        for torrent in torrentlist:
+            if torrent['hash'].lower() == hash.lower():
+                progress = torrent.get('progress', 0)
+                state = torrent.get('state', 'unknown')
+                name = torrent.get('name', 'unknown')
+                
+                # qBittorrent states: downloading, uploading, pausedDL, pausedUP, queuedDL, queuedUP, 
+                # stalledDL, stalledUP, checkingDL, checkingUP, error, missingFiles, queuedForChecking
+                completed = progress >= 1.0 or state in ['uploading', 'stalledUP', 'pausedUP', 'queuedUP']
+                
+                logger.debug(f"qBittorrent torrent {name}: {progress*100:.1f}% complete, state: {state}")
+                
+                return {
+                    'completed': completed,
+                    'progress': progress,
+                    'status': state,
+                    'name': name
+                }
+                
+        logger.error(f"qBittorrent torrent with hash {hash} not found")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error checking qBittorrent torrent completion: {e}")
+        return None
+
+
 def apiVersion2():
     logger.debug('getApiVersion')
 

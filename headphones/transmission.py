@@ -153,6 +153,46 @@ def removeTorrent(torrentid, remove_data=False):
     return False
 
 
+def checkCompleted(torrentid):
+    """
+    Check if a torrent has completed downloading
+    
+    Args:
+        torrentid: Hash of the torrent to check
+        
+    Returns:
+        dict: {'completed': bool, 'progress': float, 'status': str} or None if error
+    """
+    method = 'torrent-get'
+    arguments = {'ids': torrentid, 'fields': ['percentDone', 'status', 'isFinished', 'name']}
+    
+    response = torrentAction(method, arguments)
+    if not response:
+        return None
+        
+    try:
+        torrent = response['arguments']['torrents'][0]
+        percent_done = torrent['percentDone']
+        status = torrent['status']
+        is_finished = torrent['isFinished']
+        name = torrent['name']
+        
+        # Status codes: 0=stopped, 1=check pending, 2=checking, 3=download pending, 4=downloading, 5=seed pending, 6=seeding
+        completed = percent_done == 1.0 and (status == 6 or is_finished)
+        
+        logger.debug(f"Transmission torrent {name}: {percent_done*100:.1f}% complete, status: {status}, finished: {is_finished}")
+        
+        return {
+            'completed': completed,
+            'progress': percent_done,
+            'status': status,
+            'name': name
+        }
+    except (KeyError, IndexError) as e:
+        logger.error(f"Error parsing Transmission torrent status: {e}")
+        return None
+
+
 def torrentAction(method, arguments):
     global _session_id
     host = headphones.CONFIG.TRANSMISSION_HOST

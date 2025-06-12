@@ -198,55 +198,180 @@ def download_completed():
     return completed_albums, errored_albums
 
 
-def download_completed_album(username, foldername):
-    client = initialize_soulseek_client()
-    downloads = client.transfers.get_downloads(username)
-
-    # Anything older than 24 hours will be canceled
-    cutoff_time = datetime.now() - timedelta(hours=24)
-
-    total_count = 0
-    completed_count = 0
-    errored_count = 0
-    file_ids = []
-
-    # Identify errored and completed album
-    directories = downloads.get('directories', [])
-    for directory in directories:
-        album_part = directory.get('directory', '').split('\\')[-1]
-        if album_part == foldername:
-            files = directory.get('files', [])
-            for file_data in files:
-                state = file_data.get('state', '')
-                requested_at_str = file_data.get('requestedAt', '1900-01-01 00:00:00')
-                requested_at = parse_datetime(requested_at_str)
-
-                total_count += 1
-                file_id = file_data.get('id', '')
-                file_ids.append(file_id)
-
-                if 'Completed, Succeeded' in state:
-                    completed_count += 1
-                elif 'Completed, Errored' in state or requested_at < cutoff_time:
-                    errored_count += 1
-            break
-
-    completed = True if completed_count == total_count else False
-    errored = True if errored_count else False
-
-    # Cancel downloads for errored album
-    if errored:
-        for file_id in file_ids:
+def checkCompleted(username, folder_name):
+    """
+    Check if a Soulseek download has completed with robust error handling.
+    
+    Args:
+        username: Username from whom the download was initiated
+        folder_name: Name of the folder/album being downloaded
+        
+    Returns:
+        dict: {'completed': bool, 'progress': float, 'status': str} or None if error
+    """
+    try:
+        client = initialize_soulseek_client()
+        if not client:
+            logger.error("Failed to initialize Soulseek client")
+            return None
+            
+        downloads = client.transfers.get_downloads(username)
+        
+        if downloads is None:
+            logger.error(f"Soulseek API returned no download data for user {username}")
+            return None
+        
+        # Anything older than 24 hours will be considered stale
+        cutoff_time = datetime.now() - timedelta(hours=24)
+        
+        total_count = 0
+        completed_count = 0
+        errored_count = 0
+        
+        # Find the specific album/folder
+        directories = downloads.get('directories', [])
+        for directory in directories:
             try:
-                success = client.transfers.cancel_download(username, file_id, remove=True)
+                album_part = directory.get('directory', '').split('\\')[-1]
+                if album_part == folder_name:
+                    files = directory.get('files', [])
+                    for file_data in files:
+                        try:
+                            state = file_data.get('state', '')
+                            requested_at_str = file_data.get('requestedAt', '1900-01-01 00:00:00')
+                            requested_at = parse_datetime(requested_at_str)
+                            
+                            total_count += 1
+                            
+                            if 'Completed, Succeeded' in state:
+                                completed_count += 1
+                            elif 'Completed, Errored' in state or requested_at < cutoff_time:
+                                errored_count += 1
+                        except Exception as e:
+                            logger.warning(f"Error processing file data in Soulseek download check: {e}")
+                            errored_count += 1
+                    break
             except Exception as e:
-                logger.debug(f"Soulseek failed to cancel download for folder with file ID: {foldername} {file_id}")
+                logger.warning(f"Error processing directory in Soulseek download check: {e}")
+                continue
+        
+        if total_count == 0:
+            logger.warning(f"Soulseek download {folder_name} from {username} not found")
+            return None
+            
+        # Calculate progress and status
+        progress = completed_count / total_count if total_count > 0 else 0
+        completed = completed_count == total_count and errored_count == 0
+        
+        if errored_count > 0:
+            status = 'errored'
+        elif completed:
+            status = 'completed'
+        else:
+            status = 'downloading'
+            
+        logger.debug(f"Soulseek download {folder_name}: {progress*100:.1f}% complete, {completed_count}/{total_count} files, status: {status}")
+        
+        return {
+            'completed': completed,
+            'progress': progress,
+            'status': status,
+            'name': folder_name
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking Soulseek download completion for {folder_name}: {e}")
+        return None
 
-    return completed, errored
+
+def download_completed_album(username, foldername):
+    """Check if Soulseek album download is completed with robust error handling."""
+    try:
+        client = initialize_soulseek_client()
+        if not client:
+            logger.error("Failed to initialize Soulseek client for album status check")
+            return False, True  # Assume error state on client failure
+            
+        downloads = client.transfers.get_downloads(username)
+        
+        if downloads is None:
+            logger.error(f"Soulseek API returned no download data for user {username}")
+            return False, True  # Assume error state on API failure
+
+        # Anything older than 24 hours will be canceled
+        cutoff_time = datetime.now() - timedelta(hours=24)
+
+        total_count = 0
+        completed_count = 0
+        errored_count = 0
+        file_ids = []
+
+        # Identify errored and completed album
+        try:
+            directories = downloads.get('directories', [])
+            for directory in directories:
+                try:
+                    album_part = directory.get('directory', '').split('\\')[-1]
+                    if album_part == foldername:
+                        files = directory.get('files', [])
+                        for file_data in files:
+                            try:
+                                state = file_data.get('state', '')
+                                requested_at_str = file_data.get('requestedAt', '1900-01-01 00:00:00')
+                                requested_at = parse_datetime(requested_at_str)
+
+                                total_count += 1
+                                file_id = file_data.get('id', '')
+                                file_ids.append(file_id)
+
+                                if 'Completed, Succeeded' in state:
+                                    completed_count += 1
+                                elif 'Completed, Errored' in state or requested_at < cutoff_time:
+                                    errored_count += 1
+                            except Exception as e:
+                                logger.warning(f"Error processing file data for {foldername}: {e}")
+                                errored_count += 1
+                        break
+                except Exception as e:
+                    logger.warning(f"Error processing directory for {foldername}: {e}")
+                    continue
+        except Exception as e:
+            logger.error(f"Error accessing directories for {foldername}: {e}")
+            return False, True
+
+        completed = True if completed_count == total_count and total_count > 0 else False
+        errored = True if errored_count > 0 else False
+
+        # Cancel downloads for errored album
+        if errored and file_ids:
+            logger.info(f"Cancelling errored downloads for {foldername}")
+            for file_id in file_ids:
+                try:
+                    success = client.transfers.cancel_download(username, file_id, remove=True)
+                    if not success:
+                        logger.debug(f"Failed to cancel download for file ID: {file_id}")
+                except Exception as e:
+                    logger.debug(f"Soulseek failed to cancel download for folder {foldername}, file ID {file_id}: {e}")
+
+        logger.debug(f"Soulseek album {foldername} status: completed={completed}, errored={errored}, {completed_count}/{total_count} files")
+        return completed, errored
+        
+    except Exception as e:
+        logger.error(f"Error checking Soulseek album completion for {foldername}: {e}")
+        return False, True  # Assume error state on exception
 
 
 def parse_datetime(datetime_string):
-    # Parse the datetime api response
-    if '.' in datetime_string:
-        datetime_string = datetime_string[:datetime_string.index('.')+7]
-    return datetime.strptime(datetime_string, '%Y-%m-%dT%H:%M:%S.%f')
+    """Parse the datetime API response with error handling."""
+    try:
+        # Parse the datetime api response
+        if '.' in datetime_string:
+            datetime_string = datetime_string[:datetime_string.index('.')+7]
+        return datetime.strptime(datetime_string, '%Y-%m-%dT%H:%M:%S.%f')
+    except ValueError as e:
+        logger.warning(f"Failed to parse datetime string '{datetime_string}': {e}")
+        # Return a very old date as fallback
+        return datetime(1900, 1, 1)
+    except Exception as e:
+        logger.error(f"Unexpected error parsing datetime '{datetime_string}': {e}")
+        return datetime(1900, 1, 1)

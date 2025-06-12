@@ -1156,6 +1156,7 @@ class WebInterface(object):
             "api_enabled": checked(headphones.CONFIG.API_ENABLED),
             "api_key": headphones.CONFIG.API_KEY,
             "download_scan_interval": headphones.CONFIG.DOWNLOAD_SCAN_INTERVAL,
+            "check_completion_via_api": checked(headphones.CONFIG.CHECK_COMPLETION_VIA_API),
             "update_db_interval": headphones.CONFIG.UPDATE_DB_INTERVAL,
             "mb_ignore_age": headphones.CONFIG.MB_IGNORE_AGE,
             "mb_ignore_age_missing": checked(headphones.CONFIG.MB_IGNORE_AGE_MISSING),
@@ -1460,6 +1461,7 @@ class WebInterface(object):
 
         checked_configs = [
             "launch_browser", "enable_https", "api_enabled", "use_blackhole", "headphones_indexer",
+            "check_completion_via_api",
             "use_newznab", "newznab_enabled", "use_torznab", "torznab_enabled",
             "use_nzbsorg", "use_omgwtfnzbs", "use_piratebay", "use_rutracker",
             "use_orpheus", "use_redacted", "redacted_use_fltoken", "preferred_bitrate_allow_lossless",

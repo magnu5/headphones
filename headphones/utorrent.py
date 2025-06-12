@@ -263,6 +263,49 @@ def getFolder(hash):
         return os.path.basename(os.path.normpath(torrent_folder))
 
 
+def checkCompleted(hash):
+    """
+    Check if a torrent has completed downloading
+    
+    Args:
+        hash: Hash of the torrent to check
+        
+    Returns:
+        dict: {'completed': bool, 'progress': float, 'status': str} or None if error
+    """
+    uTorrentClient = utorrentclient()
+    try:
+        status, torrentList = uTorrentClient.list()
+        if not torrentList or 'torrents' not in torrentList:
+            return None
+            
+        torrents = torrentList['torrents']
+        for torrent in torrents:
+            if torrent[0].upper() == hash.upper():
+                name = torrent[2]
+                progress = torrent[4] / 1000.0  # uTorrent returns progress in permille (0-1000)
+                status_text = torrent[21] if len(torrent) > 21 else 'Unknown'
+                
+                # uTorrent status: Started, Downloading, Seeding, Paused, Stopped, Finished, etc.
+                completed = progress >= 1.0 or status_text in ['Finished', 'Seeding']
+                
+                logger.debug(f"uTorrent torrent {name}: {progress*100:.1f}% complete, status: {status_text}")
+                
+                return {
+                    'completed': completed,
+                    'progress': progress,
+                    'status': status_text,
+                    'name': name
+                }
+        
+        logger.error(f"uTorrent torrent with hash {hash} not found")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error checking uTorrent torrent completion: {e}")
+        return None
+
+
 def getSettingsDirectories():
     uTorrentClient = utorrentclient()
     settings = uTorrentClient.get_settings()

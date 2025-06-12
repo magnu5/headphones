@@ -27,7 +27,7 @@ from beets import config as beetsconfig
 from beets import logging as beetslogging
 from mediafile import MediaFile, FileTypeError, UnreadableFileError
 from beetsplug import lyrics as beetslyrics
-from headphones import notifiers, utorrent, transmission, deluge, qbittorrent, soulseek
+from headphones import notifiers, utorrent, transmission, deluge, qbittorrent, soulseek, sab
 from headphones import db, albumart, librarysync
 from headphones import logger, helpers, mb, music_encoder
 from headphones import metadata
@@ -35,7 +35,129 @@ from headphones import metadata
 postprocessor_lock = threading.Lock()
 
 
+def checkJobStatusViaAPI():
+    """
+    Check job completion status via API calls to download clients.
+    Used when CHECK_COMPLETION_VIA_API is enabled.
+    """
+    logger.info("Checking job status via download client APIs.")
+    
+    with postprocessor_lock:
+        myDB = db.DBConnection()
+        snatched = myDB.select('SELECT * from snatched WHERE Status="Snatched"')
+        
+        for album in snatched:
+            try:
+                completed = False
+                album_path = None
+                
+                # Handle different download types
+                if album['Kind'] == 'soulseek':
+                    # Soulseek doesn't have an API, fallback to folder check
+                    if album['FolderName']:
+                        folder_name = album['FolderName']
+                        match = re.search(r'\\{(.*?)\\}(.*?)$', folder_name)
+                        if match:
+                            user_name = match.group(1)
+                            folder_name = match.group(2)
+                            completed, errored = soulseek.download_completed_album(user_name, folder_name)
+                            if errored:
+                                logger.info(f"Soulseek: Album with folder '{folder_name}' had errors during download. Setting status to 'Wanted'.")
+                                myDB.action('UPDATE albums SET Status="Wanted" WHERE AlbumID=? AND Status="Snatched"', (album['AlbumID'],))
+                                myDB.action('UPDATE snatched SET status = "Unprocessed" WHERE AlbumID=?', (album['AlbumID'],))
+                                continue
+                            if completed:
+                                album_path = os.path.join(headphones.CONFIG.SOULSEEK_DOWNLOAD_DIR, folder_name)
+                                
+                elif album['Kind'] == 'nzb' and album['FolderName']:
+                    # Check SABnzbd via API
+                    nzb_id = album['FolderName']  # Assume FolderName contains NZB ID for API checking
+                    status_info = sab.checkCompleted(nzb_id)
+                    if status_info:
+                        completed = status_info['completed']
+                        if completed:
+                            # Get the actual folder name from SAB
+                            album_path = os.path.join(headphones.CONFIG.DOWNLOAD_DIR, status_info['name'])
+                        logger.debug(f"SABnzbd job {album['Title']}: {status_info['progress']*100:.1f}% complete, status: {status_info['status']}")
+                    
+                elif album['TorrentHash'] and headphones.CONFIG.TORRENT_DOWNLOADER:
+                    # Check torrent clients via API
+                    torrent_hash = album['TorrentHash']
+                    
+                    if headphones.CONFIG.TORRENT_DOWNLOADER == 1:  # Transmission
+                        status_info = transmission.checkCompleted(torrent_hash)
+                        if status_info:
+                            completed = status_info['completed']
+                            logger.debug(f"Transmission torrent {album['Title']}: {status_info['progress']*100:.1f}% complete, status: {status_info['status']}")
+                            
+                    elif headphones.CONFIG.TORRENT_DOWNLOADER == 3:  # Deluge
+                        status_info = deluge.checkCompleted(torrent_hash)
+                        if status_info:
+                            completed = status_info['completed']
+                            logger.debug(f"Deluge torrent {album['Title']}: {status_info['progress']*100:.1f}% complete, status: {status_info['status']}")
+                            
+                    elif headphones.CONFIG.TORRENT_DOWNLOADER == 4:  # qBittorrent
+                        status_info = qbittorrent.checkCompleted(torrent_hash)
+                        if status_info:
+                            completed = status_info['completed']
+                            logger.debug(f"qBittorrent torrent {album['Title']}: {status_info['progress']*100:.1f}% complete, status: {status_info['status']}")
+                    
+                    # Add support for other torrent clients as needed
+                    # elif headphones.CONFIG.TORRENT_DOWNLOADER == 2:  # uTorrent
+                    #     # uTorrent API support could be added here
+                    #     pass
+                    
+                    # Get folder path if completed
+                    if completed and album['FolderName']:
+                        if headphones.CONFIG.DELUGE_DONE_DIRECTORY and headphones.CONFIG.TORRENT_DOWNLOADER == 3:
+                            download_dir = headphones.CONFIG.DELUGE_DONE_DIRECTORY
+                        else:
+                            download_dir = headphones.CONFIG.DOWNLOAD_TORRENT_DIR
+                        album_path = os.path.join(download_dir, album['FolderName'])
+                        
+                elif album['Kind'] == 'bandcamp' and album['FolderName']:
+                    # Bandcamp doesn't have API, check folder
+                    album_path = os.path.join(headphones.CONFIG.BANDCAMP_DIR, album['FolderName'])
+                    completed = os.path.exists(album_path)
+                
+                # If job is completed and we have a path, verify the download
+                if completed and album_path and os.path.exists(album_path):
+                    logger.info(f'Job completed for "{album["Title"]}" via API check. Verifying...')
+                    # Determine if it's a single file
+                    single = False
+                    if album['TorrentHash'] and headphones.CONFIG.TORRENT_DOWNLOADER:
+                        if headphones.CONFIG.TORRENT_DOWNLOADER == 1:
+                            _, single = transmission.getFolder(album['TorrentHash'])
+                        elif headphones.CONFIG.TORRENT_DOWNLOADER == 4:
+                            _, single = qbittorrent.getFolder(album['TorrentHash'])
+                    
+                    verify(album['AlbumID'], album_path, album['Kind'], single=single)
+                    
+            except Exception as e:
+                logger.error(f"Error checking job status via API for {album['Title']}: {e}")
+                continue
+    
+    logger.debug("API job status checking finished.")
+
+
 def checkFolder():
+    """
+    Check download completion using either API polling or folder scanning,
+    based on the CHECK_COMPLETION_VIA_API configuration setting.
+    """
+    if headphones.CONFIG.CHECK_COMPLETION_VIA_API:
+        logger.info("Using API-based job status checking.")
+        checkJobStatusViaAPI()
+    else:
+        logger.info("Using folder-based download checking.")
+        checkFolderLegacy()
+
+
+def checkFolderLegacy():
+    """
+    Original folder-based checking method.
+    Scans download folders for completed downloads (only snatched ones).
+    """
     logger.info("Checking download folder for completed downloads (only snatched ones).")
 
     with postprocessor_lock:

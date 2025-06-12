@@ -100,6 +100,7 @@ _CONFIG_DEFINITIONS = {
     'CHECK_GITHUB_INTERVAL': (int, 'General', 360),
     'CHECK_GITHUB_ON_STARTUP': (int, 'General', 1),
     'CLEANUP_FILES': (int, 'General', 0),
+    'CHECK_COMPLETION_VIA_API': (bool_int, 'General', False),
     'CONFIG_VERSION': (str, 'General', '2'),
     'CORRECT_METADATA': (int, 'General', 0),
     'CUE_SPLIT': (int, 'General', 1),
